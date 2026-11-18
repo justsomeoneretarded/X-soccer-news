@@ -4,8 +4,9 @@ An English-language soccer news poster for a global audience. It reads
 Telegram news and goal channels, with BBC Sport, The Guardian and Sky Sports
 RSS feeds as a fallback. Each run
 previews or publishes one eligible story. Gemini rewrites the headline and
-adds a sharp question when there is a real soccer debate to have. X posts
-credit the source by name. The source URL remains in internal history.
+adds a sharp question when there is a real soccer debate to have. RSS posts
+credit the publisher by name. Telegram posts contain only the rewritten copy.
+Source URLs stay in the workflow report and posting history.
 
 - Uses the Telegram caption or RSS headline and summary. Items over 90 minutes
   old, future-dated items, and apparent gossip, betting, opinion or watch
@@ -26,8 +27,8 @@ credit the source by name. The source URL remains in internal history.
 
 The five news channels in `telegram_sources.json` supply standalone news
 posts. After checking for goals, a run tries up to two fresh Telegram items
-before trying an RSS headline. Telegram reports are attributed to the channel
-and can be drafted even when no RSS feed carries the story.
+before trying an RSS headline. Telegram stories can be drafted even when
+no RSS feed carries them.
 
 `goalposten` and `Goals_Channel` supply goal clips. During active play, a
 fresh, recognizable goal with a downloadable MP4 takes priority over a news
