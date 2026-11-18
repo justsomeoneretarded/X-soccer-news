@@ -34,6 +34,7 @@ class NewsTests(unittest.TestCase):
             item("Future result", "https://www.example.org/soccer/future", -60),
             item("Club signs striker", "https://example.org.bad.example/soccer/result", 100),
             item("England beats Australia", "https://www.example.org/cricket/live", 90),
+            item("Player back to training", "https://www.example.org/soccer/live-blog/transfer-gossip", 70),
             item("Club reportedly signs striker", "https://www.example.org/soccer/rumour", 100),
         ]) + "</channel></rss>"
         [result] = list(news.parse_feed(xml, self.source, self.now))

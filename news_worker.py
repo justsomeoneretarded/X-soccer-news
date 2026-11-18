@@ -74,7 +74,7 @@ def parse_feed(data, source, now):
             published = date.timestamp()
         except (ValueError, TypeError, OverflowError):
             continue
-        if (not url or not title or not 0 <= now - published <= MAX_AGE
+        if (not url or "/live-blog/" in urlsplit(url).path or not title or not 0 <= now - published <= MAX_AGE
                 or not urlsplit(url).path.startswith(source["path_prefix"])
                 or NON_NEWS.search(title) or any(c in title for c in ("@", "<", ">"))):
             continue
