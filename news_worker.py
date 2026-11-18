@@ -14,6 +14,7 @@ from xml.etree import ElementTree
 
 import app
 import automation
+import news_copy
 from actions_runner import GitState, StateError
 
 
@@ -35,14 +36,11 @@ class Story:
     source: str
     published: float
     priority: int
+    summary: str = ""
 
     @property
     def identity(self):
         return hashlib.sha256(self.url.encode()).hexdigest()[:24]
-
-    @property
-    def post(self):
-        return f"{self.title}\n\n{self.source}: {self.url}"
 
 
 def canonical_url(url, hosts):
@@ -78,10 +76,9 @@ def parse_feed(data, source, now):
                 or not urlsplit(url).path.startswith(source["path_prefix"])
                 or NON_NEWS.search(title) or any(c in title for c in ("@", "<", ">"))):
             continue
-        # A conservative character budget allows for X's fixed-length URL handling.
-        if 2 * len(title) + len(source["name"]) + 27 > 280:
-            continue
-        yield Story(title, url, source["name"], published, source["priority"])
+        description = html.unescape(item.findtext("description", ""))
+        summary = " ".join(re.sub(r"<[^>]*>", " ", description).split())[:750]
+        yield Story(title, url, source["name"], published, source["priority"], summary)
 
 
 def collect(sources, now):
@@ -139,15 +136,23 @@ def run(state, live=False):
         story = select(stories, connection, now)
         if story is None:
             return report | {"publishing": "no fresh eligible headline"}
+        if not news_copy.configured():
+            return report | {"publishing": "skipped: GEMINI_API_KEY missing"}
+        post = news_copy.draft(story.title, story.summary, story.source)
+        if not post:
+            return report | {"publishing": "skipped: no usable Gemini rewrite"}
+        now = app.now()
+        if now - story.published > MAX_AGE:
+            return report | {"publishing": "skipped: headline expired while drafting"}
         if not live:
-            return report | {"publishing": "preview", "draft": story.post}
+            return report | {"publishing": "preview", "draft": post}
         automation.authorization()
         connection.execute("INSERT INTO stories VALUES(?,?,?,?,?,?,?,?)",
                            (story.identity, story.title, story.url, story.source, story.published, now, 0, "reserved"))
         connection.execute("INSERT INTO publications VALUES(?,?,?,NULL)", (story.identity, now, "uncertain"))
     state.checkpoint()
     try:
-        post_id = automation.send(story.post)
+        post_id = automation.send(post)
     except Exception:
         return report | {"ok": False, "publishing": "outcome uncertain; headline reserved",
                          "source_url": story.url}

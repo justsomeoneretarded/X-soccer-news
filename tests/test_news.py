@@ -39,16 +39,20 @@ class NewsTests(unittest.TestCase):
         ]) + "</channel></rss>"
         [result] = list(news.parse_feed(xml, self.source, self.now))
         self.assertEqual(result.url, "https://www.example.org/soccer/coach")
-        self.assertTrue(result.post.startswith("Club confirms new coach\n\nExample Sport"))
+        self.assertEqual(result.title, "Club confirms new coach")
 
     def story(self, title="Club confirms their new head coach", path="coach"):
         return news.Story(title, f"https://example.org/{path}", "Example Sport", self.now - 60, 1)
 
     def test_preview_does_not_contact_x_or_reserve(self):
         with patch.object(news, "collect", return_value=([self.story()], {"source": {"eligible": 1}})), \
+             patch.object(news.news_copy, "configured", return_value=True), \
+             patch.object(news.news_copy, "draft", return_value="A new coach is in.\n\nRight call?") as draft, \
              patch.object(automation, "authorization") as auth, patch.object(automation, "send") as send:
             result = news.run(None)
         self.assertEqual(result["publishing"], "preview")
+        self.assertEqual(result["draft"], "A new coach is in.\n\nRight call?")
+        draft.assert_called_once()
         auth.assert_not_called()
         send.assert_not_called()
         with automation.ledger() as connection:
@@ -59,17 +63,28 @@ class NewsTests(unittest.TestCase):
                    ([self.story("Club confirms new head coach", "other")], {"source": {"eligible": 1}})]
         state = Mock()
 
-        def timeout(_):
+        def timeout(post):
+            self.assertEqual(post, "A new coach is in.")
             state.checkpoint.assert_called_once()
             with automation.ledger() as connection:
                 self.assertEqual(connection.execute("SELECT state FROM publications").fetchone()[0], "uncertain")
             raise TimeoutError
 
         with patch.object(news, "collect", side_effect=results), patch.object(automation, "authorization"), \
+             patch.object(news.news_copy, "configured", return_value=True), \
+             patch.object(news.news_copy, "draft", return_value="A new coach is in."), \
              patch.object(automation, "send", side_effect=timeout) as send:
             self.assertFalse(news.run(state, live=True)["ok"])
             self.assertEqual(news.run(state, live=True)["publishing"], "no fresh eligible headline")
         send.assert_called_once()
+
+    def test_unusable_rewrite_skips_before_publication(self):
+        with patch.object(news, "collect", return_value=([self.story()], {"source": {"eligible": 1}})), \
+             patch.object(news.news_copy, "configured", return_value=True), \
+             patch.object(news.news_copy, "draft", return_value=None), \
+             patch.object(automation, "authorization") as auth:
+            self.assertEqual(news.run(Mock(), live=True)["publishing"], "skipped: no usable Gemini rewrite")
+        auth.assert_not_called()
 
     def test_changed_score_stays_distinct(self):
         self.assertFalse(news.same_headline("United beats City 2-1 in cup", "United beats City 3-1 in cup"))
