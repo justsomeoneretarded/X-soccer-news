@@ -38,7 +38,6 @@ class Story:
     url: str
     source: str
     published: float
-    priority: int
     summary: str = ""
 
     @property
@@ -81,7 +80,7 @@ def parse_feed(data, source, now):
             continue
         description = html.unescape(item.findtext("description", ""))
         summary = " ".join(re.sub(r"<[^>]*>", " ", description).split())[:750]
-        yield Story(title, url, source["name"], published, source["priority"], summary)
+        yield Story(title, url, source["name"], published, summary)
 
 
 def collect(sources, now):
@@ -135,7 +134,7 @@ def select(stories, connection, now, signals=()):
 
     return max(eligible, key=lambda story: (
         story.published + (600 if BREAKING.search(story.title) else 0) + signal_boost(story),
-        story.priority, story.url), default=None)
+        story.published, hashlib.sha256(" ".join(story.title.casefold().split()).encode()).digest()), default=None)
 
 
 def publish(state, item_id, title, url, source, published, post, report, *, video=None, digest=None, goal_key=None):
@@ -187,6 +186,8 @@ def try_goal(state, goals, report, live):
             except (OSError, ValueError):
                 continue
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if clip.disallowed:
+                digest = f"disallowed-{digest}"
             if digest in hashes or app.now() - entry.published > telegram_news.GOAL_MAX_AGE:
                 continue
             item_id = "goal-" + hashlib.sha256(entry.url.encode()).hexdigest()[:22]

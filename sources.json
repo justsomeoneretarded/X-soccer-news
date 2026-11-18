@@ -6,7 +6,6 @@
       "bbc.co.uk",
       "bbc.com"
     ],
-    "priority": 3,
     "path_prefix": "/sport/football/"
   },
   {
@@ -15,7 +14,6 @@
     "hosts": [
       "theguardian.com"
     ],
-    "priority": 2,
     "path_prefix": "/football/"
   },
   {
@@ -24,7 +22,6 @@
     "hosts": [
       "skysports.com"
     ],
-    "priority": 1,
     "path_prefix": "/football/"
   }
 ]

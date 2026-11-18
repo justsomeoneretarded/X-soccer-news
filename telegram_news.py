@@ -17,8 +17,15 @@ GOAL_MAX_AGE = 45 * 60
 SIGNAL_MAX_AGE = 2 * 3600
 PROMO = re.compile(r"\b(?:sponsored|casino|betting|promo code|sportsbook)\b", re.I)
 NOT_GOAL = re.compile(
-    r"\b(?:offside|disallowed|ruled out|no goal|full time|half time|"
+    r"\b(?:full time|half time|"
     r"goal kick|penalty shootout|penalty saved|missed|red card)\b", re.I
+)
+DISALLOWED = re.compile(r"\b(?:disallowed|ruled out|no goal|(?:flagged|given|for) offside)\b", re.I)
+NAME = r"[^\W\d_][^\W\d_’'–-]*(?:[’'–-][^\W\d_]+)*"
+SCORER = (
+    re.compile(rf"^({NAME}(?:\s+{NAME}){{0,3}})\s+(?:scores?\b|equalis\w*\b|equaliz\w*\b)", re.I),
+    re.compile(rf"^({NAME}(?:\s+{NAME}){{0,3}})[’']s\s+goal\b", re.I),
+    re.compile(rf"^disallowed goal (?:for|by|from)\s+({NAME}(?:\s+{NAME}){{0,3}})$", re.I),
 )
 GOAL_LANGUAGE = re.compile(r"\b(?:goals?|scores?|equalis\w+|equaliz\w+|seals? the comeback)\b", re.I)
 SCORE = re.compile(r"^(.+?)\s+\[?(\d{1,2})\s*[-–:]\s*(\d{1,2})\]?\s+(.+)$")
@@ -37,6 +44,7 @@ class Goal:
     identity: str
     caption: str
     entry: Entry
+    disallowed: bool = False
 
 
 def entries(channel):
@@ -78,7 +86,24 @@ def clean(line):
 def goal(entry):
     if not entry.video or NOT_GOAL.search(entry.text) or not GOAL_LANGUAGE.search(entry.text):
         return None
-    for line in re.split(r"\n|\s+[|l]\s+", entry.text):
+    disallowed = bool(DISALLOWED.search(entry.text))
+    lines = re.split(r"\n|\s+[|l]\s+", entry.text)
+    if disallowed:
+        scorer = None
+        for line in lines:
+            cleaned = clean(line)
+            for pattern in SCORER:
+                if match := pattern.match(cleaned):
+                    scorer = match[1]
+                    break
+            if scorer:
+                break
+        reason = " | Offside" if re.search(r"\boffside\b", entry.text, re.I) else ""
+        label = f"⚽ DISALLOWED GOAL | {scorer}" if scorer else "⚽ DISALLOWED GOAL"
+        # The feed may show the overturned score. Never present it as the match score.
+        event = hashlib.sha256(entry.url.encode()).hexdigest()[:22]
+        return Goal(f"disallowed-{event}", label + reason, entry, disallowed=True)
+    for line in lines:
         match = SCORE.fullmatch(re.sub(r"^Goal\s+", "", clean(line), flags=re.I))
         if not match:
             continue

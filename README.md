@@ -13,8 +13,8 @@ credit the publisher by name. The article URL remains in internal history.
   usable copy. The prompt calls for source-grounded rewrites. Output checks
   reject copied headlines, URLs and newly introduced numbers.
 - Ranks by recency, with a small boost for apparent results, signings and
-  announcements. Some stories will appear later than events because the bot
-  depends on publishers' RSS update times.
+  announcements. Publisher names do not enter the ranking. Some stories
+  will appear later than events because the bot depends on RSS update times.
 - Skips previously attempted URLs and similar recent headlines. This is
   headline-based deduplication, so feeds can still describe the same event
   in very different words.
@@ -32,8 +32,10 @@ fresh, recognizable goal with a downloadable MP4 takes priority over a news
 headline. The bot uses the source scoreline and posts the actual video with
 a short caption. Clips must be posted to Telegram within the last 45 minutes.
 The age check uses the Telegram timestamp, and the scoreline is taken from
-the feed. The bot skips apparent disallowed goals and suppresses duplicate
-match scores within six hours as well as identical video files.
+the feed. Explicitly disallowed goals are labeled as such, with the scorer
+when clear and without the overturned scoreline. The bot suppresses duplicate
+counted match scores within six hours and identical videos for the same
+outcome. An overturned goal can follow an earlier counted-goal clip.
 
 Previews can show goal candidates without uploading video. Live runs can
 post video, and `AUTO_PUBLISH` controls whether the scheduled runs are enabled.

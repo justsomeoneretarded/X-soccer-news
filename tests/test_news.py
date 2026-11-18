@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timezone
 from email.utils import formatdate
 from pathlib import Path
@@ -12,7 +13,7 @@ import news_worker as news
 
 class NewsTests(unittest.TestCase):
     now = datetime(2026, 11, 18, tzinfo=timezone.utc).timestamp()
-    source = {"name": "Example Sport", "hosts": ["example.org"], "priority": 1, "path_prefix": "/soccer/"}
+    source = {"name": "Example Sport", "hosts": ["example.org"], "path_prefix": "/soccer/"}
 
     def setUp(self):
         directory = TemporaryDirectory()
@@ -45,7 +46,7 @@ class NewsTests(unittest.TestCase):
         self.assertEqual(result.title, "Club confirms new coach")
 
     def story(self, title="Club confirms their new head coach", path="coach"):
-        return news.Story(title, f"https://example.org/{path}", "Example Sport", self.now - 60, 1)
+        return news.Story(title, f"https://example.org/{path}", "Example Sport", self.now - 60)
 
     def test_preview_does_not_contact_x_or_reserve(self):
         with patch.object(news, "collect", return_value=([self.story()], {"source": {"eligible": 1}})), \
@@ -88,6 +89,16 @@ class NewsTests(unittest.TestCase):
              patch.object(automation, "authorization") as auth:
             self.assertEqual(news.run(Mock(), live=True)["publishing"], "skipped: no usable Gemini rewrite")
         auth.assert_not_called()
+
+    def test_headline_tie_is_independent_of_publisher(self):
+        first = self.story("Club welcomes new head coach")
+        second = replace(first, title="City unveils new practice ground",
+                         source="Other Sport", url="https://other.example/facilities")
+        with automation.ledger() as connection:
+            selected = news.select([first, second], connection, self.now).title
+            swapped = [replace(first, source=second.source, url=second.url),
+                       replace(second, source=first.source, url=first.url)]
+            self.assertEqual(news.select(swapped[::-1], connection, self.now).title, selected)
 
     def test_changed_score_stays_distinct(self):
         self.assertFalse(news.same_headline("United beats City 2-1 in cup", "United beats City 3-1 in cup"))
