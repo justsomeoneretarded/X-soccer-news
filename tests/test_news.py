@@ -12,7 +12,7 @@ import news_worker as news
 
 class NewsTests(unittest.TestCase):
     now = datetime(2026, 11, 18, tzinfo=timezone.utc).timestamp()
-    source = {"name": "Example Sport", "hosts": ["example.org"], "priority": 1}
+    source = {"name": "Example Sport", "hosts": ["example.org"], "priority": 1, "path_prefix": "/soccer/"}
 
     def setUp(self):
         directory = TemporaryDirectory()
@@ -30,10 +30,11 @@ class NewsTests(unittest.TestCase):
                     f"<pubDate>{formatdate(self.now-age, usegmt=True)}</pubDate></item>")
         xml = "<rss><channel>" + "".join([
             item("Club confirms new coach", "https://www.example.org/soccer/coach?utm_source=rss", 120),
-            item("Old result", "https://www.example.org/old", news.MAX_AGE + 1),
-            item("Future result", "https://www.example.org/future", -60),
-            item("Club signs striker", "https://example.org.bad.example/result", 100),
-            item("Club reportedly signs striker", "https://www.example.org/rumour", 100),
+            item("Old result", "https://www.example.org/soccer/old", news.MAX_AGE + 1),
+            item("Future result", "https://www.example.org/soccer/future", -60),
+            item("Club signs striker", "https://example.org.bad.example/soccer/result", 100),
+            item("England beats Australia", "https://www.example.org/cricket/live", 90),
+            item("Club reportedly signs striker", "https://www.example.org/soccer/rumour", 100),
         ]) + "</channel></rss>"
         [result] = list(news.parse_feed(xml, self.source, self.now))
         self.assertEqual(result.url, "https://www.example.org/soccer/coach")
