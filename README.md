@@ -1,7 +1,7 @@
 # X Soccer News
 
 An English-language soccer news poster for a global audience. It reads the
-public football RSS feeds from BBC Sport, The Guardian and ESPN. Each run
+public football RSS feeds from BBC Sport, The Guardian and Sky Sports. Each run
 previews or publishes one eligible headline with the publisher name and article URL.
 
 - Uses the publisher's headline and publication time. Items over 90 minutes
