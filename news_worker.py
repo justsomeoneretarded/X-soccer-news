@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+import unicodedata
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from xml.etree import ElementTree
 
@@ -39,6 +40,7 @@ class Story:
     source: str
     published: float
     summary: str = ""
+    telegram: bool = False
 
     @property
     def identity(self):
@@ -98,6 +100,26 @@ def collect(sources, now):
     return stories, report
 
 
+def telegram_story(channel, entry):
+    text = unicodedata.normalize("NFKC", entry.text)
+    text = re.sub(r"https?://\S+|www\.\S+|(?<!\w)[@#]\w+", "", text)
+    lines = []
+    for line in text.splitlines():
+        line = " ".join(line.split()).strip(" ✖️🔗")
+        if not line or re.fullmatch(r"(?:official|breaking|[\W_]+)[:!\s]*", line, re.I):
+            continue
+        if re.fullmatch(r"(?:[A-Z]+/)+[A-Za-z ]+", line) or re.match(r"^(?:follow|subscribe|join)\b", line, re.I):
+            continue
+        lines.append(line)
+    if not lines:
+        return None
+    title = lines[0]
+    summary = " ".join(lines[1:])[:750]
+    if len(tokens(title)) < 4 or NON_NEWS.search(title) or NON_NEWS.search(summary):
+        return None
+    return Story(title[:240], entry.url, f"Telegram / {channel}", entry.published, summary, telegram=True)
+
+
 def tokens(title):
     return set(re.findall(r"[^\W_]+", title.casefold())) - STOP_WORDS
 
@@ -111,7 +133,7 @@ def same_headline(first, second):
         len(left & right) >= 4 and len(left & right) / len(left | right) >= 0.7))
 
 
-def select(stories, connection, now, signals=()):
+def ranked_stories(stories, connection, now):
     history = connection.execute("""
         SELECT s.url, s.title, p.attempted FROM stories s
         JOIN publications p ON p.story_id = s.id
@@ -124,17 +146,10 @@ def select(stories, connection, now, signals=()):
     eligible = (story for story in stories if 0 <= now - story.published <= MAX_AGE
                 and url_key(story.url) not in seen_urls
                 and not any(same_headline(story.title, title) for title in recent_titles))
-    signal_words = [tokens(signal) for signal in signals]
-
-    def signal_boost(story):
-        words = tokens(story.title)
-        return 180 if len(words) >= 4 and any(
-            len(words & signal) >= max(4, len(words) * 0.7) for signal in signal_words
-        ) else 0
-
-    return max(eligible, key=lambda story: (
-        story.published + (600 if BREAKING.search(story.title) else 0) + signal_boost(story),
-        story.published, hashlib.sha256(" ".join(story.title.casefold().split()).encode()).digest()), default=None)
+    return sorted(eligible, key=lambda story: (
+        story.telegram,
+        story.published + (600 if BREAKING.search(story.title) else 0),
+        story.published, hashlib.sha256(" ".join(story.title.casefold().split()).encode()).digest()), reverse=True)
 
 
 def publish(state, item_id, title, url, source, published, post, report, *, video=None, digest=None, goal_key=None):
@@ -203,29 +218,36 @@ def run(state, live=False):
     sources = json.loads((app.ROOT / "sources.json").read_text())
     with ThreadPoolExecutor(max_workers=2) as pool:
         rss = pool.submit(collect, sources, now)
-        telegram = pool.submit(telegram_news.collect, telegram_config, now)
+        telegram = pool.submit(telegram_news.collect, telegram_config, now, MAX_AGE)
         stories, sources_report = rss.result()
-        goals, signals, telegram_report = telegram.result()
+        goals, telegram_entries, telegram_report = telegram.result()
+    stories.extend(story for channel, entry in telegram_entries if (story := telegram_story(channel, entry)))
     report = {"sources": sources_report, "telegram": telegram_report,
-              "ok": any("eligible" in r for r in sources_report.values())}
+              "ok": any("eligible" in r for r in sources_report.values())
+              or any("posts" in r for r in telegram_report.values())}
     result = try_goal(state, goals, report, live)
     if result is not None:
         return result
     with automation.ledger() as connection:
-        story = select(stories, connection, app.now(), signals)
-    if story is None:
+        ranked = ranked_stories(stories, connection, app.now())
+    if not ranked:
         return report | {"publishing": "no fresh eligible headline"}
     if not news_copy.configured():
         return report | {"publishing": "skipped: GEMINI_API_KEY missing"}
-    post = news_copy.draft(story.title, story.summary, story.source)
-    if not post:
-        return report | {"publishing": "skipped: no usable Gemini rewrite"}
-    if app.now() - story.published > MAX_AGE:
-        return report | {"publishing": "skipped: headline expired while drafting"}
-    if not live:
-        return report | {"publishing": "preview", "draft": post}
-    return publish(state, story.identity, story.title, story.url, story.source,
-                   story.published, post, report)
+
+    telegram_picks = [story for story in ranked if story.telegram][:2]
+    rss_pick = next((story for story in ranked if not story.telegram), None)
+    for story in telegram_picks + ([rss_pick] if rss_pick else []):
+        if app.now() - story.published > MAX_AGE:
+            continue
+        post = news_copy.draft(story.title, story.summary, story.source)
+        if not post or app.now() - story.published > MAX_AGE:
+            continue
+        if not live:
+            return report | {"publishing": "preview", "draft": post, "source_url": story.url}
+        return publish(state, story.identity, story.title, story.url, story.source,
+                       story.published, post, report)
+    return report | {"publishing": "skipped: no usable Gemini rewrite"}
 
 
 def main():

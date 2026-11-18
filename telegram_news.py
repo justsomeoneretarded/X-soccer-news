@@ -1,4 +1,4 @@
-"""Telegram signals and goal clips for the soccer news account."""
+"""Telegram news posts and goal clips for the soccer news account."""
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
@@ -14,7 +14,6 @@ import media
 
 
 GOAL_MAX_AGE = 45 * 60
-SIGNAL_MAX_AGE = 2 * 3600
 PROMO = re.compile(r"\b(?:sponsored|casino|betting|promo code|sportsbook)\b", re.I)
 NOT_GOAL = re.compile(
     r"\b(?:full time|half time|"
@@ -121,7 +120,7 @@ def goal(entry):
     return None
 
 
-def collect(config, now):
+def collect(config, now, news_max_age):
     channels = config["goals"] + config["news"]
 
     def fetch(channel):
@@ -130,7 +129,7 @@ def collect(config, now):
         except (OSError, ValueError) as error:
             return [], type(error).__name__
 
-    goals, signals, report = [], [], {}
+    goals, news, report = [], [], {}
     with ThreadPoolExecutor(max_workers=8) as pool:
         for channel, (posts, error) in zip(channels, pool.map(fetch, channels)):
             if error:
@@ -142,7 +141,7 @@ def collect(config, now):
                 goals.extend(clips)
                 report[channel] = {"posts": len(posts), "fresh_goal_clips": len(clips)}
             else:
-                recent = [post.text for post in posts if 0 <= now - post.published <= SIGNAL_MAX_AGE]
-                signals.extend(recent)
-                report[channel] = {"posts": len(posts), "fresh_news_signals": len(recent)}
-    return goals, signals, report
+                recent = [post for post in posts if 0 <= now - post.published <= news_max_age]
+                news.extend((channel, post) for post in recent)
+                report[channel] = {"posts": len(posts), "fresh_news_posts": len(recent)}
+    return goals, news, report

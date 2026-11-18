@@ -1,20 +1,21 @@
 # X Soccer News
 
-An English-language soccer news poster for a global audience. It reads the
-public football RSS feeds from BBC Sport, The Guardian and Sky Sports. Each run
+An English-language soccer news poster for a global audience. It reads
+Telegram news and goal channels, with BBC Sport, The Guardian and Sky Sports
+RSS feeds as a fallback. Each run
 previews or publishes one eligible story. Gemini rewrites the headline and
 adds a sharp question when there is a real soccer debate to have. X posts
-credit the publisher by name. The article URL remains in internal history.
+credit the source by name. The source URL remains in internal history.
 
-- Uses the publisher's headline, RSS summary and publication time. Items over 90 minutes
+- Uses the Telegram caption or RSS headline and summary. Items over 90 minutes
   old, future-dated items, and apparent gossip, betting, opinion or watch
   guides are skipped. The headline filters are heuristic.
 - Skips publication if Gemini is missing, rate-limited, or unable to return
   usable copy. The prompt calls for source-grounded rewrites. Output checks
   reject copied headlines, URLs and newly introduced numbers.
 - Ranks by recency, with a small boost for apparent results, signings and
-  announcements. Publisher names do not enter the ranking. Some stories
-  will appear later than events because the bot depends on RSS update times.
+  announcements. Channel and publisher names do not enter ranking within
+  each tier.
 - Skips previously attempted URLs and similar recent headlines. This is
   headline-based deduplication, so feeds can still describe the same event
   in very different words.
@@ -23,9 +24,10 @@ credit the publisher by name. The article URL remains in internal history.
 
 ## Telegram and matchday goals
 
-The channels in `telegram_sources.json` have two roles. The news channels
-can give a small ranking boost to matching publisher headlines. Telegram
-captions do not become standalone news claims.
+The five news channels in `telegram_sources.json` supply standalone news
+posts. After checking for goals, a run tries up to two fresh Telegram items
+before trying an RSS headline. Telegram reports are attributed to the channel
+and can be drafted even when no RSS feed carries the story.
 
 `goalposten` and `Goals_Channel` supply goal clips. During active play, a
 fresh, recognizable goal with a downloadable MP4 takes priority over a news

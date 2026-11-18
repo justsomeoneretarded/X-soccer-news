@@ -90,15 +90,48 @@ class NewsTests(unittest.TestCase):
             self.assertEqual(news.run(Mock(), live=True)["publishing"], "skipped: no usable Gemini rewrite")
         auth.assert_not_called()
 
+    def test_telegram_post_runs_without_an_rss_match_and_precedes_newer_rss(self):
+        entry = news.telegram_news.Entry(
+            "https://t.me/LiveFootballEA/42", self.now - 1200,
+            "🚨 𝐎𝐅𝐅𝐈𝐂𝐈𝐀𝐋: Arda Güler extends his Real Madrid contract until 2032.\n"
+            "Follow us @channel https://example.com",
+            None,
+        )
+        telegram = ([], [("LiveFootballEA", entry)], {"LiveFootballEA": {"posts": 1}})
+        with patch.object(news.telegram_news, "collect", return_value=telegram), \
+             patch.object(news, "collect", return_value=([self.story()], {"source": {"eligible": 1}})), \
+             patch.object(news.news_copy, "configured", return_value=True), \
+             patch.object(news.news_copy, "draft", return_value="Draft") as draft:
+            result = news.run(None)
+        self.assertEqual(result["source_url"], entry.url)
+        draft.assert_called_once_with(
+            "🚨 OFFICIAL: Arda Güler extends his Real Madrid contract until 2032.",
+            "", "Telegram / LiveFootballEA",
+        )
+
+    def test_rss_is_the_fallback_when_telegram_copy_is_rejected(self):
+        entry = news.telegram_news.Entry(
+            "https://t.me/Football_Memez/42", self.now - 60,
+            "A soccer caption that the editor rejects", None,
+        )
+        rss = self.story()
+        with patch.object(news.telegram_news, "collect", return_value=(
+                 [], [("Football_Memez", entry)], {"Football_Memez": {"posts": 1}})), \
+             patch.object(news, "collect", return_value=([rss], {"source": {"eligible": 1}})), \
+             patch.object(news.news_copy, "configured", return_value=True), \
+             patch.object(news.news_copy, "draft", side_effect=[None, "RSS draft"]):
+            result = news.run(None)
+        self.assertEqual(result["source_url"], rss.url)
+
     def test_headline_tie_is_independent_of_publisher(self):
         first = self.story("Club welcomes new head coach")
         second = replace(first, title="City unveils new practice ground",
                          source="Other Sport", url="https://other.example/facilities")
         with automation.ledger() as connection:
-            selected = news.select([first, second], connection, self.now).title
+            selected = news.ranked_stories([first, second], connection, self.now)[0].title
             swapped = [replace(first, source=second.source, url=second.url),
                        replace(second, source=first.source, url=first.url)]
-            self.assertEqual(news.select(swapped[::-1], connection, self.now).title, selected)
+            self.assertEqual(news.ranked_stories(swapped[::-1], connection, self.now)[0].title, selected)
 
     def test_changed_score_stays_distinct(self):
         self.assertFalse(news.same_headline("United beats City 2-1 in cup", "United beats City 3-1 in cup"))
