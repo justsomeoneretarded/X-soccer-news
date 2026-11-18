@@ -21,6 +21,25 @@ credit the publisher by name. The article URL remains in internal history.
 - Reserves a story in this repo's own `autopost-state` branch before sending.
   An uncertain send is preserved in history and that headline is never retried.
 
+## Telegram and matchday goals
+
+The channels in `telegram_sources.json` have two roles. The news channels
+can give a small ranking boost to matching publisher headlines. Telegram
+captions do not become standalone news claims.
+
+`goalposten` and `Goals_Channel` supply goal clips. During active play, a
+fresh, recognizable goal with a downloadable MP4 takes priority over a news
+headline. The bot uses the source scoreline and posts the actual video with
+a short caption. Clips must be posted to Telegram within the last 45 minutes.
+The age check uses the Telegram timestamp, and the scoreline is taken from
+the feed. The bot skips apparent disallowed goals and suppresses duplicate
+match scores within six hours as well as identical video files.
+
+Previews can show goal candidates without uploading video. To enable live
+video, confirm you have rights to republish the footage and set the news
+repository Actions variable `PUBLISH_GOAL_CLIPS` to `true`. It applies only
+to live runs. `AUTO_PUBLISH` separately controls the scheduled runs.
+
 ## Preview and go live
 
 1. Add `GEMINI_API_KEY` in **Settings → Secrets and variables → Actions**.
@@ -32,7 +51,7 @@ credit the publisher by name. The article URL remains in internal history.
 3. Set the **news account's** `TWEETKIT_COOKIE` under repository **Settings →
    Secrets and variables → Actions**. The pinned TweetKit adapter uses an
    unofficial X session and can stop working if the session expires.
-4. Run with **Publish one eligible headline to X** checked and confirm the
+4. Run with **Publish one eligible item to X** checked and confirm the
    actual post on the account before enabling unattended dispatches.
 
 The scheduled job stays disabled unless the repository Actions variable
@@ -47,6 +66,7 @@ python -m unittest discover -s tests -v
 python news_worker.py
 ```
 
-The local command runs without an X session or installed dependencies. Set
+Install the preview dependency with `python -m pip install -r requirements-preview.txt`.
+The local command runs without an X session. Set
 `GEMINI_API_KEY` in the environment to generate real preview copy.
 Live access and scheduling require account setup.

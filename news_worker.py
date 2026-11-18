@@ -9,11 +9,14 @@ import json
 import os
 from pathlib import Path
 import re
+import tempfile
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from xml.etree import ElementTree
 
 import app
 import automation
+import media
+import telegram_news
 import news_copy
 from actions_runner import GitState, StateError
 
@@ -109,7 +112,7 @@ def same_headline(first, second):
         len(left & right) >= 4 and len(left & right) / len(left | right) >= 0.7))
 
 
-def select(stories, connection, now):
+def select(stories, connection, now, signals=()):
     history = connection.execute("""
         SELECT s.url, s.title, p.attempted FROM stories s
         JOIN publications p ON p.story_id = s.id
@@ -122,46 +125,107 @@ def select(stories, connection, now):
     eligible = (story for story in stories if 0 <= now - story.published <= MAX_AGE
                 and url_key(story.url) not in seen_urls
                 and not any(same_headline(story.title, title) for title in recent_titles))
+    signal_words = [tokens(signal) for signal in signals]
+
+    def signal_boost(story):
+        words = tokens(story.title)
+        return 180 if len(words) >= 4 and any(
+            len(words & signal) >= max(4, len(words) * 0.7) for signal in signal_words
+        ) else 0
+
     return max(eligible, key=lambda story: (
-        story.published + (600 if BREAKING.search(story.title) else 0),
+        story.published + (600 if BREAKING.search(story.title) else 0) + signal_boost(story),
         story.priority, story.url), default=None)
 
 
-def run(state, live=False):
-    sources = json.loads((app.ROOT / "sources.json").read_text())
-    stories, sources_report = collect(sources, app.now())
-    report = {"sources": sources_report, "ok": any("eligible" in r for r in sources_report.values())}
+def publish(state, item_id, title, url, source, published, post, report, *, video=None, digest=None, goal_key=None):
+    automation.authorization()
     now = app.now()
+    if now - published > (telegram_news.GOAL_MAX_AGE if video else MAX_AGE):
+        return report | {"publishing": "skipped: candidate expired"}
     with automation.ledger() as connection:
-        story = select(stories, connection, now)
-        if story is None:
-            return report | {"publishing": "no fresh eligible headline"}
-        if not news_copy.configured():
-            return report | {"publishing": "skipped: GEMINI_API_KEY missing"}
-        post = news_copy.draft(story.title, story.summary, story.source)
-        if not post:
-            return report | {"publishing": "skipped: no usable Gemini rewrite"}
-        now = app.now()
-        if now - story.published > MAX_AGE:
-            return report | {"publishing": "skipped: headline expired while drafting"}
-        if not live:
-            return report | {"publishing": "preview", "draft": post}
-        automation.authorization()
         connection.execute("INSERT INTO stories VALUES(?,?,?,?,?,?,?,?)",
-                           (story.identity, story.title, story.url, story.source, story.published, now, 0, "reserved"))
-        connection.execute("INSERT INTO publications VALUES(?,?,?,NULL)", (story.identity, now, "uncertain"))
+                           (item_id, title, url, source, published, now, 0, "reserved"))
+        connection.execute("INSERT INTO publications VALUES(?,?,?,NULL)", (item_id, now, "uncertain"))
+        if digest:
+            connection.execute("INSERT INTO goal_media_hashes VALUES(?)", (digest,))
+            connection.execute("INSERT INTO goal_events VALUES (?,?)", (goal_key, published))
     state.checkpoint()
     try:
-        post_id = automation.send(post)
+        post_id = automation.send(post, image_path=video) if video else automation.send(post)
     except Exception:
-        return report | {"ok": False, "publishing": "outcome uncertain; headline reserved",
-                         "source_url": story.url}
+        return report | {"ok": False, "publishing": "outcome uncertain; item reserved",
+                         "source_url": url}
     with automation.ledger() as connection:
         connection.execute("UPDATE publications SET state='posted', post_id=? WHERE story_id=?",
-                           (post_id, story.identity))
-        connection.execute("UPDATE stories SET status='posted' WHERE id=?", (story.identity,))
+                           (post_id, item_id))
+        connection.execute("UPDATE stories SET status='posted' WHERE id=?", (item_id,))
     state.checkpoint()
-    return report | {"publishing": "posted", "post_id": post_id, "source_url": story.url}
+    return report | {"ok": True, "publishing": "posted goal clip" if video else "posted",
+                     "post_id": post_id, "source_url": url}
+
+
+def try_goal(state, goals, report, live):
+    with automation.ledger() as connection:
+        seen_urls = {row["url"] for row in connection.execute("SELECT url FROM stories WHERE id LIKE 'goal-%'")}
+        connection.execute("CREATE TABLE IF NOT EXISTS goal_events (event TEXT NOT NULL, published REAL NOT NULL)")
+        connection.execute("DELETE FROM goal_events WHERE published < ?", (app.now() - 6 * 3600,))
+        seen_events = {row["event"] for row in connection.execute("SELECT event FROM goal_events")}
+        connection.execute("CREATE TABLE IF NOT EXISTS goal_media_hashes (digest TEXT PRIMARY KEY)")
+        hashes = {row["digest"] for row in connection.execute("SELECT digest FROM goal_media_hashes")}
+    fresh = [clip for clip in goals if clip.identity not in seen_events
+             and clip.entry.url not in seen_urls
+             and 0 <= app.now() - clip.entry.published <= telegram_news.GOAL_MAX_AGE]
+    for clip in sorted(fresh, key=lambda clip: clip.entry.published, reverse=True)[:3]:
+        entry = clip.entry
+        if not live:
+            return report | {"ok": True, "publishing": "goal clip preview",
+                             "draft": clip.caption, "source_url": entry.url}
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                path = media.download_media(entry.video, directory, video=True)
+            except (OSError, ValueError):
+                continue
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if digest in hashes or app.now() - entry.published > telegram_news.GOAL_MAX_AGE:
+                continue
+            item_id = "goal-" + hashlib.sha256(entry.url.encode()).hexdigest()[:22]
+            return publish(state, item_id, clip.caption, entry.url, "Telegram",
+                           entry.published, clip.caption, report, video=path, digest=digest,
+                           goal_key=clip.identity)
+    return None
+
+
+def run(state, live=False):
+    now = app.now()
+    telegram_config = json.loads((app.ROOT / "telegram_sources.json").read_text())
+    sources = json.loads((app.ROOT / "sources.json").read_text())
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        rss = pool.submit(collect, sources, now)
+        telegram = pool.submit(telegram_news.collect, telegram_config, now)
+        stories, sources_report = rss.result()
+        goals, signals, telegram_report = telegram.result()
+    report = {"sources": sources_report, "telegram": telegram_report,
+              "ok": any("eligible" in r for r in sources_report.values())}
+    if not live or os.environ.get("PUBLISH_GOAL_CLIPS") == "true":
+        result = try_goal(state, goals, report, live)
+        if result is not None:
+            return result
+    with automation.ledger() as connection:
+        story = select(stories, connection, app.now(), signals)
+    if story is None:
+        return report | {"publishing": "no fresh eligible headline"}
+    if not news_copy.configured():
+        return report | {"publishing": "skipped: GEMINI_API_KEY missing"}
+    post = news_copy.draft(story.title, story.summary, story.source)
+    if not post:
+        return report | {"publishing": "skipped: no usable Gemini rewrite"}
+    if app.now() - story.published > MAX_AGE:
+        return report | {"publishing": "skipped: headline expired while drafting"}
+    if not live:
+        return report | {"publishing": "preview", "draft": post}
+    return publish(state, story.identity, story.title, story.url, story.source,
+                   story.published, post, report)
 
 
 def main():

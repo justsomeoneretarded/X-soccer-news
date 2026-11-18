@@ -23,6 +23,9 @@ class NewsTests(unittest.TestCase):
         clock = patch.object(app, "now", return_value=self.now)
         clock.start()
         self.addCleanup(clock.stop)
+        telegram = patch.object(news.telegram_news, "collect", return_value=([], [], {}))
+        telegram.start()
+        self.addCleanup(telegram.stop)
 
     def test_feed_rejects_stale_future_untrusted_and_speculative_items(self):
         def item(title, url, age):
