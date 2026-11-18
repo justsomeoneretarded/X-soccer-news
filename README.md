@@ -35,10 +35,8 @@ The age check uses the Telegram timestamp, and the scoreline is taken from
 the feed. The bot skips apparent disallowed goals and suppresses duplicate
 match scores within six hours as well as identical video files.
 
-Previews can show goal candidates without uploading video. To enable live
-video, confirm you have rights to republish the footage and set the news
-repository Actions variable `PUBLISH_GOAL_CLIPS` to `true`. It applies only
-to live runs. `AUTO_PUBLISH` separately controls the scheduled runs.
+Previews can show goal candidates without uploading video. Live runs can
+post video, and `AUTO_PUBLISH` controls whether the scheduled runs are enabled.
 
 ## Preview and go live
 

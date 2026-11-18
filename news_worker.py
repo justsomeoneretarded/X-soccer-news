@@ -207,10 +207,9 @@ def run(state, live=False):
         goals, signals, telegram_report = telegram.result()
     report = {"sources": sources_report, "telegram": telegram_report,
               "ok": any("eligible" in r for r in sources_report.values())}
-    if not live or os.environ.get("PUBLISH_GOAL_CLIPS") == "true":
-        result = try_goal(state, goals, report, live)
-        if result is not None:
-            return result
+    result = try_goal(state, goals, report, live)
+    if result is not None:
+        return result
     with automation.ledger() as connection:
         story = select(stories, connection, app.now(), signals)
     if story is None:

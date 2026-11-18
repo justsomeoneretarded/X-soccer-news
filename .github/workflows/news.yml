@@ -38,7 +38,6 @@ jobs:
           TWEETKIT_COOKIE: ${{ (inputs.live || github.event_name == 'schedule') && secrets.TWEETKIT_COOKIE || '' }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
-          PUBLISH_GOAL_CLIPS: ${{ vars.PUBLISH_GOAL_CLIPS }}
           TRENDING_DB: ${{ runner.temp }}/soccer-news.db
           LIVE: ${{ (inputs.live || github.event_name == 'schedule') }}
           INITIALIZE: ${{ inputs.initialize }}
