@@ -1,0 +1,5 @@
+[
+  {"name":"BBC Sport","url":"https://feeds.bbci.co.uk/sport/football/rss.xml","hosts":["bbc.co.uk","bbc.com"],"priority":3},
+  {"name":"The Guardian","url":"https://www.theguardian.com/football/rss","hosts":["theguardian.com"],"priority":2},
+  {"name":"ESPN","url":"https://www.espn.com/espn/rss/soccer/news","hosts":["espn.com"],"priority":1}
+]

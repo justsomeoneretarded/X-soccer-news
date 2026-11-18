@@ -1,0 +1,51 @@
+name: Soccer news
+on:
+  schedule:
+    - cron: '3-59/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      live:
+        description: Publish one eligible headline to X
+        type: boolean
+        default: false
+      initialize:
+        description: Create isolated posting history with a preview
+        type: boolean
+        default: false
+permissions:
+  contents: write
+concurrency:
+  group: soccer-news-posting
+  cancel-in-progress: false
+jobs:
+  news:
+    if: github.event_name == 'workflow_dispatch' || vars.AUTO_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install X adapter for live runs
+        if: (inputs.live || github.event_name == 'schedule')
+        run: python -m pip install -r requirements.txt
+      - name: Collect and preview or publish
+        env:
+          TWEETKIT_COOKIE: ${{ (inputs.live || github.event_name == 'schedule') && secrets.TWEETKIT_COOKIE || '' }}
+          TRENDING_DB: ${{ runner.temp }}/soccer-news.db
+          LIVE: ${{ (inputs.live || github.event_name == 'schedule') }}
+          INITIALIZE: ${{ inputs.initialize }}
+        run: |
+          args=()
+          if [[ "$LIVE" == true ]]; then args+=(--live); fi
+          if [[ "$INITIALIZE" == true ]]; then args+=(--initialize); fi
+          python news_worker.py "${args[@]}"
+      - name: Save report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soccer-news-report
+          path: posting-report.json
+          if-no-files-found: ignore
+          retention-days: 7
