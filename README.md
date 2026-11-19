@@ -20,6 +20,10 @@ Source URLs stay in the workflow report and posting history.
 - Skips previously attempted URLs and similar recent headlines. This is
   headline-based deduplication, so feeds can still describe the same event
   in very different words.
+- A clear follow-up can quote the bot's own post from the last 72 hours.
+  Gemini checks that it is the same specific event and points to a material
+  new fact in the current source. Shared teams or players alone do not qualify.
+  Ordinary stories publish on their own.
 - Reserves a story in this repo's own `autopost-state` branch before sending.
   An uncertain send is preserved in history and that headline is never retried.
 

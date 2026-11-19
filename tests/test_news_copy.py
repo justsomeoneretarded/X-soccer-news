@@ -40,6 +40,29 @@ class CopyTests(unittest.TestCase):
         self.assertIsNone(self.render("United fall to City", "See https://example.com?"))
         self.assertIsNone(self.render("United fall 3-1 to City", "Right result?"))
 
+    def test_quote_requires_a_recognized_post_and_new_source_evidence(self):
+        prior = {"123": {"headline": "United open talks for Garcia",
+                         "post": "United have opened talks for Garcia."}}
+        copy = {"lead": "Garcia signs for United on a five-year deal.",
+                "question": "Is he worth building around?", "quote_id": "123",
+                "new_fact": "agreed a five-year deal"}
+
+        def render():
+            payload = {"candidates": [{"content": {"parts": [{"text": json.dumps(copy)}]}}]}
+            with patch.dict("os.environ", {"GEMINI_API_KEY": "test"}), \
+                 patch.object(news_copy, "urlopen", return_value=io.BytesIO(json.dumps(payload).encode())):
+                return news_copy.draft_update("United confirm Garcia transfer",
+                                              "Garcia agreed a five-year deal.", "BBC Sport", prior)
+
+        self.assertEqual(render()[1], "123")
+        copy["new_fact"] = "passed his medical"
+        self.assertIsNone(render()[1])
+        copy.update(quote_id="999", new_fact="agreed a five-year deal")
+        self.assertIsNone(render()[1])
+        copy["quote_id"] = "123"
+        prior["123"]["post"] = "Garcia agreed a five-year deal."
+        self.assertIsNone(render()[1])
+
     def test_rate_limit_skips(self):
         failure = HTTPError("", 429, "rate limited", {}, None)
         with patch.dict("os.environ", {"GEMINI_API_KEY": "test"}), patch.object(

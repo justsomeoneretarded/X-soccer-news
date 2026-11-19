@@ -133,6 +133,29 @@ class NewsTests(unittest.TestCase):
                        replace(second, source=first.source, url=first.url)]
             self.assertEqual(news.ranked_stories(swapped[::-1], connection, self.now)[0].title, selected)
 
+    def test_confirmed_followup_quotes_only_an_earlier_post_from_this_account(self):
+        old = replace(self.story("United open talks for Garcia", "talks"), published=self.now - 7200)
+        update = self.story("United confirm Garcia signing", "signing")
+        with automation.ledger() as connection:
+            for story, post_id, status in ((old, "123", "posted"),
+                                           (replace(old, url="https://example.org/other"), "456", "uncertain")):
+                connection.execute("INSERT INTO stories VALUES (?,?,?,?,?,?,?,?)",
+                                   (story.identity, story.title, story.url, story.source,
+                                    story.published, story.published, 0, status))
+                connection.execute("INSERT INTO publications VALUES (?,?,?,?)",
+                                   (story.identity, story.published, status, post_id))
+
+        with patch.object(news, "collect", return_value=([update], {"source": {"eligible": 1}})), \
+             patch.object(news.news_copy, "configured", return_value=True), \
+             patch.object(news.news_copy, "draft_update", return_value=("Garcia joins United.", "123")) as draft, \
+             patch.object(automation, "authorization"), patch.object(automation, "send", return_value="789") as send:
+            result = news.run(Mock(), live=True)
+        self.assertEqual(result["quote_post_id"], "123")
+        self.assertEqual(set(draft.call_args.args[-1]), {"123"})
+        send.assert_called_once_with("Garcia joins United.", quote_id="123")
+        with automation.ledger() as connection:
+            self.assertEqual(connection.execute("SELECT quote_id FROM news_post_context").fetchone()[0], "123")
+
     def test_changed_score_stays_distinct(self):
         self.assertFalse(news.same_headline("United beats City 2-1 in cup", "United beats City 3-1 in cup"))
 

@@ -24,6 +24,7 @@ from actions_runner import GitState, StateError
 
 MAX_AGE = 90 * 60
 DUPLICATE_WINDOW = 12 * 3600
+FOLLOWUP_WINDOW = 72 * 3600
 NON_NEWS = re.compile(r"\b(?:transfer talk|transfer rumours?|transfer rumors?|gossip|reportedly|sources?\s*:|exclusive|"
                       r"rumou?rs?|linked with|weighs? up|in talks|could sign|set to|"
                       r"predictions?|betting|odds|podcast|newsletter|watch live|minute-by-minute|"
@@ -152,7 +153,29 @@ def ranked_stories(stories, connection, now):
         story.published, hashlib.sha256(" ".join(story.title.casefold().split()).encode()).digest()), reverse=True)
 
 
-def publish(state, item_id, title, url, source, published, post, report, *, video=None, digest=None, goal_key=None):
+def prior_posts(connection, story, now):
+    shared_terms = tokens(story.title) - {
+        "club", "coach", "football", "league", "manager", "match", "player", "season", "team",
+    }
+    matches = {}
+    rows = connection.execute("""
+        SELECT p.post_id, s.title, n.copy FROM publications p
+        JOIN stories s ON s.id = p.story_id
+        LEFT JOIN news_post_context n ON n.story_id = s.id
+        WHERE p.state = 'posted' AND p.attempted >= ? AND s.published < ?
+          AND s.id NOT LIKE 'goal-%'
+        ORDER BY p.attempted DESC
+    """, (now - FOLLOWUP_WINDOW, story.published))
+    for row in rows:
+        post_id = row["post_id"] or ""
+        if post_id.isascii() and post_id.isdecimal() and len(shared_terms & tokens(row["title"])) >= 2:
+            matches[post_id] = {"headline": row["title"], "post": row["copy"] or ""}
+            if len(matches) == 3:
+                break
+    return matches
+
+
+def publish(state, item_id, title, url, source, published, post, report, *, video=None, digest=None, goal_key=None, quote_id=None):
     automation.authorization()
     now = app.now()
     if now - published > (telegram_news.GOAL_MAX_AGE if video else MAX_AGE):
@@ -164,9 +187,16 @@ def publish(state, item_id, title, url, source, published, post, report, *, vide
         if digest:
             connection.execute("INSERT INTO goal_media_hashes VALUES(?)", (digest,))
             connection.execute("INSERT INTO goal_events VALUES (?,?)", (goal_key, published))
+        else:
+            connection.execute("INSERT INTO news_post_context VALUES (?,?,?)", (item_id, post, quote_id))
     state.checkpoint()
     try:
-        post_id = automation.send(post, image_path=video) if video else automation.send(post)
+        if video:
+            post_id = automation.send(post, image_path=video)
+        elif quote_id:
+            post_id = automation.send(post, quote_id=quote_id)
+        else:
+            post_id = automation.send(post)
     except Exception:
         return report | {"ok": False, "publishing": "outcome uncertain; item reserved",
                          "source_url": url}
@@ -175,8 +205,11 @@ def publish(state, item_id, title, url, source, published, post, report, *, vide
                            (post_id, item_id))
         connection.execute("UPDATE stories SET status='posted' WHERE id=?", (item_id,))
     state.checkpoint()
-    return report | {"ok": True, "publishing": "posted goal clip" if video else "posted",
-                     "post_id": post_id, "source_url": url}
+    result = report | {"ok": True, "publishing": "posted goal clip" if video else "posted",
+                       "post_id": post_id, "source_url": url}
+    if quote_id:
+        result.update(publishing="quoted follow-up", quote_post_id=quote_id)
+    return result
 
 
 def try_goal(state, goals, report, live):
@@ -240,13 +273,22 @@ def run(state, live=False):
     for story in telegram_picks + ([rss_pick] if rss_pick else []):
         if app.now() - story.published > MAX_AGE:
             continue
-        post = news_copy.draft(story.title, story.summary, story.source)
+        with automation.ledger() as connection:
+            previous = prior_posts(connection, story, app.now())
+        quote_id = None
+        if previous:
+            post, quote_id = news_copy.draft_update(story.title, story.summary, story.source, previous) or (None, None)
+        else:
+            post = news_copy.draft(story.title, story.summary, story.source)
         if not post or app.now() - story.published > MAX_AGE:
             continue
         if not live:
-            return report | {"publishing": "preview", "draft": post, "source_url": story.url}
+            result = report | {"publishing": "preview", "draft": post, "source_url": story.url}
+            if quote_id:
+                result["quote_post_id"] = quote_id
+            return result
         return publish(state, story.identity, story.title, story.url, story.source,
-                       story.published, post, report)
+                       story.published, post, report, quote_id=quote_id)
     return report | {"publishing": "skipped: no usable Gemini rewrite"}
 
 

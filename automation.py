@@ -16,9 +16,12 @@ def authorization():
         raise ValueError('Session cookie is incomplete; update TWEETKIT_COOKIE securely') from None
 
 
-def send(text,image_path=None):
+def send(text, image_path=None, *, quote_id=None):
     client=authorization()
-    result = client.post(text,image_path=str(image_path)) if image_path else client.post(text)
+    if quote_id is not None:
+        result = client.quote(text, quote_id)
+    else:
+        result = client.post(text, image_path=str(image_path)) if image_path else client.post(text)
     if result.get('ok') is not True or not str(result.get('id', '')).isdigit():
         # Upstream response bodies may contain sensitive information. Do not log them.
         raise RuntimeError('TweetKit-X did not confirm a successful post')
@@ -28,5 +31,7 @@ def send(text,image_path=None):
 def ledger():
     c = app.connect()
     c.execute('CREATE TABLE IF NOT EXISTS publications (story_id TEXT PRIMARY KEY, attempted REAL NOT NULL, state TEXT NOT NULL, post_id TEXT)')
+    c.execute("""CREATE TABLE IF NOT EXISTS news_post_context (
+        story_id TEXT PRIMARY KEY, copy TEXT NOT NULL, quote_id TEXT)""")
     c.commit()
     return c
